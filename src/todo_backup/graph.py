@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any, Protocol
 from urllib.parse import urlencode
 
@@ -22,6 +23,12 @@ class GraphList:
     display_name: str
 
 
+class Throttled(RuntimeError):
+    def __init__(self, retry_after: int) -> None:
+        super().__init__(f"Microsoft Graph throttled the request; retry after {retry_after} seconds")
+        self.retry_after = retry_after
+
+
 class GraphClient:
     def __init__(self, transport: Transport, token_provider: TokenProvider) -> None:
         self._transport = transport
@@ -37,14 +44,20 @@ class GraphClient:
         return [GraphList(id=value["id"], display_name=value["displayName"]) for value in values]
 
     def task_delta(self, list_id: str) -> tuple[list[dict[str, Any]], str]:
+        return self.task_delta_url(self.task_delta_initial_url(list_id))
+
+    def task_delta_initial_url(self, list_id: str) -> str:
         query = urlencode(
             {
                 "$select": "id,title,status,body,createdDateTime,lastModifiedDateTime,dueDateTime,importance,categories,recurrence,reminderDateTime",
                 "$expand": "checklistItems",
             }
         )
-        url = f"{GRAPH_ROOT}/me/todo/lists/{list_id}/tasks/delta?{query}"
-        return self.task_delta_url(url)
+        return f"{GRAPH_ROOT}/me/todo/lists/{list_id}/tasks/delta?{query}"
+
+    def task_delta_page(self, url: str) -> tuple[list[dict[str, Any]], str | None, str | None]:
+        payload = self._get(url)
+        return payload.get("value", []), payload.get("@odata.nextLink"), payload.get("@odata.deltaLink")
 
     def task_delta_url(self, delta_url: str) -> tuple[list[dict[str, Any]], str]:
         url = delta_url
@@ -60,11 +73,15 @@ class GraphClient:
         return values, delta_link
 
     def _get(self, url: str) -> dict[str, Any]:
-        return self._transport.get(
-            url,
-            headers={
-                "Authorization": f"Bearer {self._token_provider.access_token()}",
-                "Accept": "application/json",
-                "Prefer": "odata.maxpagesize=50",
-            },
-        )
+        while True:
+            try:
+                return self._transport.get(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self._token_provider.access_token()}",
+                        "Accept": "application/json",
+                        "Prefer": "odata.maxpagesize=50",
+                    },
+                )
+            except Throttled as exc:
+                time.sleep(exc.retry_after)

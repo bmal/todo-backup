@@ -55,3 +55,25 @@ synced: 2026-06-26T08:30:00Z
 > - [x] Done task
 >   Done body
 """
+
+
+def test_render_html_body_as_plain_text() -> None:
+    markdown = render_markdown(
+        {
+            "schemaVersion": 1,
+            "synced": "2026-06-26T08:30:00Z",
+            "list": {"id": "list-1", "displayName": "Inbox"},
+            "tasks": [
+                {
+                    "id": "task-1",
+                    "title": "HTML task",
+                    "status": "notStarted",
+                    "body": {"contentType": "html", "content": "<p>Hello <em>there</em>.</p><p>Use &amp; keep.</p>"},
+                }
+            ],
+        }
+    )
+
+    assert "  Hello there." in markdown
+    assert "  Use & keep." in markdown
+    assert "<em>" not in markdown

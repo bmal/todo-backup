@@ -33,4 +33,47 @@ To manually confirm silent acquisition after first login, run `init-auth`, then 
 
 ```sh
 todo-backup --config ~/.config/todo-backup/config.json pull
+todo-backup --config ~/.config/todo-backup/config.json sync
+todo-backup --config ~/.config/todo-backup/config.json status
+```
+
+`pull` performs the initial export and checkpoints progress so rerunning it resumes interrupted work. `sync` uses stored Graph delta links for lazy incremental refreshes. `status` reads local `state.json` and snapshots, then prints each list's last sync time plus open/completed counts.
+
+## Weekly Scheduling
+
+Scheduling is not built into `todo-backup`; run the idempotent `sync` command from your scheduler of choice.
+
+For `launchd` on macOS, save a plist like this as `~/Library/LaunchAgents/com.example.todo-backup.plist` and load it with `launchctl load ~/Library/LaunchAgents/com.example.todo-backup.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.todo-backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/todo-backup</string>
+    <string>--config</string>
+    <string>/Users/you/.config/todo-backup/config.json</string>
+    <string>sync</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>8</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+</dict>
+</plist>
+```
+
+For cron, run `crontab -e` and add a weekly entry:
+
+```cron
+30 8 * * 1 /usr/local/bin/todo-backup --config /Users/you/.config/todo-backup/config.json sync
 ```

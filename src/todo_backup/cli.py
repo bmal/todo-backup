@@ -8,7 +8,7 @@ from todo_backup.auth import AuthError, DeviceCodeTokenProvider, init_device_cod
 from todo_backup.config import DEFAULT_CONFIG_PATH, load_config
 from todo_backup.graph import GraphClient
 from todo_backup.http import UrlLibTransport
-from todo_backup.sync import pull_once, sync_once
+from todo_backup.sync import pull_once, status_lines, sync_once
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("init-auth")
     subparsers.add_parser("pull")
     subparsers.add_parser("sync")
+    subparsers.add_parser("status")
     return parser
 
 
@@ -35,6 +36,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "sync":
             graph = GraphClient(UrlLibTransport(), DeviceCodeTokenProvider(config.client_id, config.token_cache_path))
             sync_once(graph, config.output_dir)
+            return 0
+        if args.command == "status":
+            for line in status_lines(config.output_dir):
+                print(line)
             return 0
         raise AssertionError(f"Unhandled command: {args.command}")
     except AuthError as exc:

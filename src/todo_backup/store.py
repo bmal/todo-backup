@@ -31,6 +31,20 @@ def write_pull_output(output_dir: Path, outputs: list[tuple[dict[str, Any], str,
     _write_json_atomic(output_dir / "state.json", state)
 
 
+def empty_state() -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "lists": {},
+    }
+
+
+def read_state_or_empty(output_dir: Path) -> dict[str, Any]:
+    state_file = output_dir / "state.json"
+    if not state_file.exists():
+        return empty_state()
+    return json.loads(state_file.read_text(encoding="utf-8"))
+
+
 def read_state(output_dir: Path) -> dict[str, Any]:
     return json.loads((output_dir / "state.json").read_text(encoding="utf-8"))
 
@@ -52,6 +66,20 @@ def write_sync_output(
         path = output_dir / removed_file
         if path.exists():
             path.unlink()
+    _write_json_if_changed(output_dir / "state.json", state)
+
+
+def write_pull_checkpoint(
+    output_dir: Path,
+    state: dict[str, Any],
+    snapshot: dict[str, Any],
+    snapshot_file: str,
+    markdown: str | None = None,
+    markdown_file: str | None = None,
+) -> None:
+    _write_json_if_changed(output_dir / snapshot_file, snapshot)
+    if markdown is not None and markdown_file is not None:
+        _write_text_if_changed(output_dir / markdown_file, markdown)
     _write_json_if_changed(output_dir / "state.json", state)
 
 
