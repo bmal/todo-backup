@@ -17,7 +17,7 @@ def write_pull_output(output_dir: Path, outputs: list[tuple[dict[str, Any], str,
         list_id = snapshot["list"]["id"]
         list_name = snapshot["list"]["displayName"]
         snapshot_file = Path("snapshots") / f"{list_id}.json"
-        markdown_file = _unique_markdown_file(list_name, markdown_files)
+        markdown_file = unique_markdown_file(list_name, markdown_files)
 
         _write_json_atomic(output_dir / snapshot_file, snapshot)
         _write_text_atomic(output_dir / markdown_file, markdown)
@@ -43,14 +43,19 @@ def write_sync_output(
     output_dir: Path,
     state: dict[str, Any],
     changed_outputs: list[tuple[dict[str, Any], str, str, str]],
+    removed_files: list[str] | None = None,
 ) -> None:
     for snapshot, markdown, snapshot_file, markdown_file in changed_outputs:
         _write_json_if_changed(output_dir / snapshot_file, snapshot)
         _write_text_if_changed(output_dir / markdown_file, markdown)
+    for removed_file in removed_files or []:
+        path = output_dir / removed_file
+        if path.exists():
+            path.unlink()
     _write_json_if_changed(output_dir / "state.json", state)
 
 
-def _unique_markdown_file(list_name: str, used: set[Path]) -> Path:
+def unique_markdown_file(list_name: str, used: set[Path]) -> Path:
     stem = _slugify(list_name)
     markdown_file = Path("lists") / f"{stem}.md"
     suffix = 2

@@ -9,32 +9,27 @@ from todo_backup.sync import pull_once, sync_once
 
 
 class SyncFakeTransport:
-    def __init__(self, sync_payload: dict) -> None:
+    def __init__(
+        self,
+        sync_payload: dict,
+        list_payloads: list[list[dict]] | None = None,
+        initial_task_payloads: dict[str, dict] | None = None,
+    ) -> None:
         self.sync_payload = sync_payload
+        self.list_payloads = list_payloads or [[{"id": "list-1", "displayName": "Inbox"}]]
+        self.initial_task_payloads = initial_task_payloads or {"list-1": _initial_list_1_payload()}
+        self.list_calls = 0
         self.requests: list[tuple[str, dict[str, str]]] = []
 
     def get(self, url: str, headers: dict[str, str]) -> dict:
         self.requests.append((url, headers))
         if url == f"{GRAPH_ROOT}/me/todo/lists":
-            return {"value": [{"id": "list-1", "displayName": "Inbox"}]}
-        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?") and "deltatoken" not in url:
-            return {
-                "value": [
-                    {
-                        "id": "task-open",
-                        "title": "Buy milk",
-                        "status": "notStarted",
-                        "body": {"contentType": "text", "content": "Remember oat milk."},
-                    },
-                    {
-                        "id": "task-done",
-                        "title": "File receipt",
-                        "status": "completed",
-                        "body": {"contentType": "text", "content": "June expenses"},
-                    },
-                ],
-                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=initial",
-            }
+            index = min(self.list_calls, len(self.list_payloads) - 1)
+            self.list_calls += 1
+            return {"value": self.list_payloads[index]}
+        for list_id, payload in self.initial_task_payloads.items():
+            if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/{list_id}/tasks/delta?") and "deltatoken" not in url:
+                return payload
         if url == "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=initial":
             return self.sync_payload
         raise AssertionError(f"Unexpected URL: {url}")
@@ -151,6 +146,122 @@ def test_sync_noop_produces_no_content_changes(tmp_path: Path) -> None:
     sync_once(GraphClient(transport, StaticTokenProvider()), output_dir)
 
     assert _output_texts(output_dir) == before
+
+
+def test_sync_discovers_new_list_and_pulls_it(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    transport = SyncFakeTransport(
+        {
+            "value": [],
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=unchanged",
+        },
+        list_payloads=[
+            [{"id": "list-1", "displayName": "Inbox"}],
+            [{"id": "list-1", "displayName": "Inbox"}, {"id": "list-2", "displayName": "Projects"}],
+        ],
+        initial_task_payloads={
+            "list-1": _initial_list_1_payload(),
+            "list-2": {
+                "value": [
+                    {
+                        "id": "task-project",
+                        "title": "Plan launch",
+                        "status": "notStarted",
+                        "body": {"contentType": "text", "content": "Draft milestones."},
+                    }
+                ],
+                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-2/tasks/delta?$deltatoken=new-list",
+            },
+        },
+    )
+
+    _pull_then_sync(output_dir, transport)
+
+    snapshot = _read_json(output_dir / "snapshots" / "list-2.json")
+    assert snapshot["list"] == {"id": "list-2", "displayName": "Projects"}
+    assert snapshot["tasks"][0]["title"] == "Plan launch"
+    markdown = (output_dir / "lists" / "Projects.md").read_text(encoding="utf-8")
+    assert "todo-list: Projects" in markdown
+    assert "- [ ] Plan launch" in markdown
+    state = _read_json(output_dir / "state.json")
+    assert state["lists"]["list-2"]["snapshotFile"] == "snapshots/list-2.json"
+    assert state["lists"]["list-2"]["markdownFile"] == "lists/Projects.md"
+    assert state["lists"]["list-2"]["deltaLink"].endswith("$deltatoken=new-list")
+    assert state["lists"]["list-1"]["deltaLink"].endswith("$deltatoken=unchanged")
+
+
+def test_sync_renames_list_file_and_frontmatter_preserving_tasks(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    transport = SyncFakeTransport(
+        {
+            "value": [],
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=renamed",
+        },
+        list_payloads=[
+            [{"id": "list-1", "displayName": "Inbox"}],
+            [{"id": "list-1", "displayName": "Personal"}],
+        ],
+    )
+
+    _pull_then_sync(output_dir, transport)
+
+    assert not (output_dir / "lists" / "Inbox.md").exists()
+    markdown = (output_dir / "lists" / "Personal.md").read_text(encoding="utf-8")
+    assert "todo-list: Personal" in markdown
+    assert "# Personal" in markdown
+    assert "- [ ] Buy milk" in markdown
+    assert "> - [x] File receipt" in markdown
+    snapshot = _read_json(output_dir / "snapshots" / "list-1.json")
+    assert snapshot["list"] == {"id": "list-1", "displayName": "Personal"}
+    assert [task["id"] for task in snapshot["tasks"]] == ["task-open", "task-done"]
+    state = _read_json(output_dir / "state.json")
+    assert state["lists"]["list-1"]["name"] == "Personal"
+    assert state["lists"]["list-1"]["markdownFile"] == "lists/Personal.md"
+    assert state["lists"]["list-1"]["deltaLink"].endswith("$deltatoken=renamed")
+
+
+def test_sync_deletes_removed_list_files_and_state(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    transport = SyncFakeTransport(
+        {
+            "value": [],
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=unused",
+        },
+        list_payloads=[
+            [{"id": "list-1", "displayName": "Inbox"}],
+            [],
+        ],
+    )
+    pull_once(GraphClient(transport, StaticTokenProvider()), output_dir)
+    assert (output_dir / "snapshots" / "list-1.json").exists()
+    assert (output_dir / "lists" / "Inbox.md").exists()
+
+    sync_once(GraphClient(transport, StaticTokenProvider()), output_dir)
+
+    assert not (output_dir / "snapshots" / "list-1.json").exists()
+    assert not (output_dir / "lists" / "Inbox.md").exists()
+    state = _read_json(output_dir / "state.json")
+    assert state["lists"] == {}
+
+
+def _initial_list_1_payload() -> dict:
+    return {
+        "value": [
+            {
+                "id": "task-open",
+                "title": "Buy milk",
+                "status": "notStarted",
+                "body": {"contentType": "text", "content": "Remember oat milk."},
+            },
+            {
+                "id": "task-done",
+                "title": "File receipt",
+                "status": "completed",
+                "body": {"contentType": "text", "content": "June expenses"},
+            },
+        ],
+        "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=initial",
+    }
 
 
 def _pull_then_sync(output_dir: Path, transport: SyncFakeTransport) -> None:

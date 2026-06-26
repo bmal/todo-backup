@@ -34,8 +34,6 @@ class GraphClient:
             payload = self._get(url)
             values.extend(payload.get("value", []))
             url = payload.get("@odata.nextLink")
-        if not values:
-            raise RuntimeError("No Microsoft To Do lists returned by Graph")
         return [GraphList(id=value["id"], display_name=value["displayName"]) for value in values]
 
     def task_delta(self, list_id: str) -> tuple[list[dict[str, Any]], str]:
