@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from todo_backup.auth import default_token_cache_path
+
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "todo-backup" / "config.json"
 DEFAULT_OUTPUT_DIR = Path.home() / "todo-backup-output"
@@ -13,6 +15,7 @@ DEFAULT_OUTPUT_DIR = Path.home() / "todo-backup-output"
 class Config:
     client_id: str
     output_dir: Path
+    token_cache_path: Path
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -27,4 +30,6 @@ def load_config(path: Path | None = None) -> Config:
 
     output = data.get("outputDir") or data.get("output_dir")
     output_dir = Path(output).expanduser() if output else DEFAULT_OUTPUT_DIR
-    return Config(client_id=client_id, output_dir=output_dir)
+    token_cache = data.get("tokenCachePath") or data.get("token_cache_path")
+    token_cache_path = Path(token_cache).expanduser() if token_cache else default_token_cache_path()
+    return Config(client_id=client_id, output_dir=output_dir, token_cache_path=token_cache_path)

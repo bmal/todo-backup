@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Mirror Microsoft To Do to local JSON snapshots and Markdown."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["msal>=1.28"]
 
 [project.scripts]
 todo-backup = "todo_backup.cli:main"
