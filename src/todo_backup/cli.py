@@ -7,7 +7,7 @@ from todo_backup.auth import StaticTokenProvider
 from todo_backup.config import DEFAULT_CONFIG_PATH, load_config
 from todo_backup.graph import GraphClient
 from todo_backup.http import UrlLibTransport
-from todo_backup.sync import pull_once
+from todo_backup.sync import pull_once, sync_once
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("pull")
+    subparsers.add_parser("sync")
     return parser
 
 
@@ -24,6 +25,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pull":
         graph = GraphClient(UrlLibTransport(), StaticTokenProvider())
         pull_once(graph, config.output_dir)
+        return 0
+    if args.command == "sync":
+        graph = GraphClient(UrlLibTransport(), StaticTokenProvider())
+        sync_once(graph, config.output_dir)
         return 0
     raise AssertionError(f"Unhandled command: {args.command}")
 

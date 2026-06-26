@@ -46,6 +46,10 @@ class GraphClient:
             }
         )
         url = f"{GRAPH_ROOT}/me/todo/lists/{list_id}/tasks/delta?{query}"
+        return self.task_delta_url(url)
+
+    def task_delta_url(self, delta_url: str) -> tuple[list[dict[str, Any]], str]:
+        url = delta_url
         values: list[dict[str, Any]] = []
         delta_link = ""
         while url:
