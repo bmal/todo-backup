@@ -7,27 +7,39 @@ from pathlib import Path
 from typing import Any
 
 
-def write_pull_output(output_dir: Path, snapshot: dict[str, Any], markdown: str, delta_link: str) -> None:
-    list_id = snapshot["list"]["id"]
-    list_name = snapshot["list"]["displayName"]
-    snapshot_file = Path("snapshots") / f"{list_id}.json"
-    markdown_file = Path("lists") / f"{_slugify(list_name)}.md"
-
-    _write_json_atomic(output_dir / snapshot_file, snapshot)
-    _write_text_atomic(output_dir / markdown_file, markdown)
+def write_pull_output(output_dir: Path, outputs: list[tuple[dict[str, Any], str, str]]) -> None:
     state = {
         "schemaVersion": 1,
-        "lists": {
-            list_id: {
-                "name": list_name,
-                "markdownFile": markdown_file.as_posix(),
-                "snapshotFile": snapshot_file.as_posix(),
-                "deltaLink": delta_link,
-                "lastSynced": snapshot["synced"],
-            }
-        },
+        "lists": {},
     }
+    markdown_files: set[Path] = set()
+    for snapshot, markdown, delta_link in outputs:
+        list_id = snapshot["list"]["id"]
+        list_name = snapshot["list"]["displayName"]
+        snapshot_file = Path("snapshots") / f"{list_id}.json"
+        markdown_file = _unique_markdown_file(list_name, markdown_files)
+
+        _write_json_atomic(output_dir / snapshot_file, snapshot)
+        _write_text_atomic(output_dir / markdown_file, markdown)
+        state["lists"][list_id] = {
+            "name": list_name,
+            "markdownFile": markdown_file.as_posix(),
+            "snapshotFile": snapshot_file.as_posix(),
+            "deltaLink": delta_link,
+            "lastSynced": snapshot["synced"],
+        }
     _write_json_atomic(output_dir / "state.json", state)
+
+
+def _unique_markdown_file(list_name: str, used: set[Path]) -> Path:
+    stem = _slugify(list_name)
+    markdown_file = Path("lists") / f"{stem}.md"
+    suffix = 2
+    while markdown_file in used:
+        markdown_file = Path("lists") / f"{stem}-{suffix}.md"
+        suffix += 1
+    used.add(markdown_file)
+    return markdown_file
 
 
 def _slugify(value: str) -> str:

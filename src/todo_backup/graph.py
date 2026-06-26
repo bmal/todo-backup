@@ -27,13 +27,16 @@ class GraphClient:
         self._transport = transport
         self._token_provider = token_provider
 
-    def first_list(self) -> GraphList:
-        payload = self._get(f"{GRAPH_ROOT}/me/todo/lists")
-        lists = payload.get("value", [])
-        if not lists:
+    def lists(self) -> list[GraphList]:
+        values: list[dict[str, Any]] = []
+        url = f"{GRAPH_ROOT}/me/todo/lists"
+        while url:
+            payload = self._get(url)
+            values.extend(payload.get("value", []))
+            url = payload.get("@odata.nextLink")
+        if not values:
             raise RuntimeError("No Microsoft To Do lists returned by Graph")
-        first = lists[0]
-        return GraphList(id=first["id"], display_name=first["displayName"])
+        return [GraphList(id=value["id"], display_name=value["displayName"]) for value in values]
 
     def task_delta(self, list_id: str) -> tuple[list[dict[str, Any]], str]:
         query = urlencode(
@@ -43,11 +46,16 @@ class GraphClient:
             }
         )
         url = f"{GRAPH_ROOT}/me/todo/lists/{list_id}/tasks/delta?{query}"
-        payload = self._get(url)
-        delta_link = payload.get("@odata.deltaLink")
+        values: list[dict[str, Any]] = []
+        delta_link = ""
+        while url:
+            payload = self._get(url)
+            values.extend(payload.get("value", []))
+            delta_link = payload.get("@odata.deltaLink", "")
+            url = payload.get("@odata.nextLink")
         if not delta_link:
             raise RuntimeError("Task delta response did not include @odata.deltaLink")
-        return list(payload.get("value", [])), delta_link
+        return values, delta_link
 
     def _get(self, url: str) -> dict[str, Any]:
         return self._transport.get(

@@ -21,8 +21,25 @@ class FakeTransport:
                     {
                         "id": "list-1",
                         "displayName": "Inbox",
+                    },
+                    {
+                        "id": "list-2",
+                        "displayName": "Projects",
                     }
                 ]
+            }
+        if url == f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?page=2":
+            return {
+                "value": [
+                    {
+                        "id": "task-done",
+                        "title": "File receipt",
+                        "status": "completed",
+                        "body": {"contentType": "text", "content": "June expenses"},
+                        "categories": ["admin"],
+                    },
+                ],
+                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=abc",
             }
         if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?"):
             return {
@@ -33,16 +50,28 @@ class FakeTransport:
                         "status": "notStarted",
                         "body": {"contentType": "text", "content": "Remember oat milk."},
                         "importance": "normal",
-                    },
-                    {
-                        "id": "task-done",
-                        "title": "File receipt",
-                        "status": "completed",
-                        "body": {"contentType": "text", "content": "June expenses"},
-                        "categories": ["admin"],
+                        "dueDateTime": {"dateTime": "2026-07-01T10:00:00", "timeZone": "UTC"},
+                        "reminderDateTime": {"dateTime": "2026-06-30T09:00:00", "timeZone": "UTC"},
+                        "recurrence": {"pattern": {"type": "weekly"}, "range": {"type": "noEnd"}},
+                        "checklistItems": [
+                            {"id": "step-1", "displayName": "Check fridge", "isChecked": True},
+                            {"id": "step-2", "displayName": "Buy carton", "isChecked": False},
+                        ],
                     },
                 ],
-                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=abc",
+                "@odata.nextLink": f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?page=2",
+            }
+        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-2/tasks/delta?"):
+            return {
+                "value": [
+                    {
+                        "id": "task-project",
+                        "title": "Plan launch",
+                        "status": "notStarted",
+                        "body": {"contentType": "text", "content": "Draft milestones."},
+                    }
+                ],
+                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-2/tasks/delta?$deltatoken=def",
             }
         raise AssertionError(f"Unexpected URL: {url}")
 
@@ -58,8 +87,15 @@ def test_pull_writes_snapshot_markdown_and_state(tmp_path: Path) -> None:
 
     snapshot = json.loads((output_dir / "snapshots" / "list-1.json").read_text(encoding="utf-8"))
     assert snapshot["list"] == {"id": "list-1", "displayName": "Inbox"}
+    assert [task["id"] for task in snapshot["tasks"]] == ["task-open", "task-done"]
     assert snapshot["tasks"][0]["importance"] == "normal"
+    assert snapshot["tasks"][0]["dueDateTime"] == {"dateTime": "2026-07-01T10:00:00", "timeZone": "UTC"}
+    assert snapshot["tasks"][0]["reminderDateTime"] == {"dateTime": "2026-06-30T09:00:00", "timeZone": "UTC"}
+    assert snapshot["tasks"][0]["recurrence"] == {"pattern": {"type": "weekly"}, "range": {"type": "noEnd"}}
     assert snapshot["tasks"][1]["categories"] == ["admin"]
+    projects_snapshot = json.loads((output_dir / "snapshots" / "list-2.json").read_text(encoding="utf-8"))
+    assert projects_snapshot["list"] == {"id": "list-2", "displayName": "Projects"}
+    assert projects_snapshot["tasks"][0]["title"] == "Plan launch"
 
     markdown = (output_dir / "lists" / "Inbox.md").read_text(encoding="utf-8")
     assert "todo-list: Inbox" in markdown
@@ -68,8 +104,15 @@ def test_pull_writes_snapshot_markdown_and_state(tmp_path: Path) -> None:
     assert "# Inbox" in markdown
     assert "- [ ] Buy milk" in markdown
     assert "  Remember oat milk." in markdown
-    assert "- [x] File receipt" in markdown
-    assert "  June expenses" in markdown
+    assert "  - [x] Check fridge" in markdown
+    assert "  - [ ] Buy carton" in markdown
+    assert "> [!done]- Completed (1)" in markdown
+    assert "> - [x] File receipt" in markdown
+    assert ">   June expenses" in markdown
+    assert markdown.index("- [ ] Buy milk") < markdown.index("> [!done]- Completed (1)")
+    projects_markdown = (output_dir / "lists" / "Projects.md").read_text(encoding="utf-8")
+    assert "todo-list: Projects" in projects_markdown
+    assert "- [ ] Plan launch" in projects_markdown
 
     state = json.loads((output_dir / "state.json").read_text(encoding="utf-8"))
     assert state["schemaVersion"] == 1
@@ -78,5 +121,10 @@ def test_pull_writes_snapshot_markdown_and_state(tmp_path: Path) -> None:
     assert state["lists"]["list-1"]["markdownFile"] == "lists/Inbox.md"
     assert state["lists"]["list-1"]["deltaLink"].endswith("$deltatoken=abc")
     assert state["lists"]["list-1"]["lastSynced"] == snapshot["synced"]
+    assert state["lists"]["list-2"]["name"] == "Projects"
+    assert state["lists"]["list-2"]["snapshotFile"] == "snapshots/list-2.json"
+    assert state["lists"]["list-2"]["markdownFile"] == "lists/Projects.md"
+    assert state["lists"]["list-2"]["deltaLink"].endswith("$deltatoken=def")
 
     assert transport.requests[0][1]["Authorization"] == "Bearer static-test-token"
+    assert any(url == f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?page=2" for url, _headers in transport.requests)
