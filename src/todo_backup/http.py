@@ -9,10 +9,13 @@ from todo_backup.graph import Throttled
 
 
 class UrlLibTransport:
+    def __init__(self, timeout: float = 60.0) -> None:
+        self._timeout = timeout
+
     def get(self, url: str, headers: dict[str, str]) -> dict[str, Any]:
         request = Request(url, headers=headers, method="GET")
         try:
-            with urlopen(request) as response:
+            with urlopen(request, timeout=self._timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             if exc.code == 429:

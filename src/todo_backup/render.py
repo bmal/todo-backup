@@ -11,7 +11,7 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
     completed_tasks = [task for task in tasks if task.get("status") == "completed"]
     lines = [
         "---",
-        f"todo-list: {todo_list['displayName']}",
+        f"todo-list: {_yaml_scalar(todo_list['displayName'])}",
         f"todo-list-id: {todo_list['id']}",
         f"synced: {snapshot['synced']}",
         "---",
@@ -23,16 +23,36 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
     for task in open_tasks:
         _append_task(lines, task)
 
-    lines.append(f"> [!done]- Completed ({len(completed_tasks)})")
-    for task in completed_tasks:
-        quoted: list[str] = []
-        _append_task(quoted, task)
-        if quoted and not quoted[-1]:
-            quoted.pop()
-        for line in quoted:
-            lines.append(f"> {line}" if line else ">")
+    if completed_tasks:
+        lines.append(f"> [!done]- Completed ({len(completed_tasks)})")
+        for task in completed_tasks:
+            quoted: list[str] = []
+            _append_task(quoted, task)
+            if quoted and not quoted[-1]:
+                quoted.pop()
+            for line in quoted:
+                lines.append(f"> {line}" if line else ">")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _yaml_scalar(value: str) -> str:
+    """Emit a frontmatter value as a plain scalar, double-quoting only when a
+    plain scalar would be ambiguous or invalid YAML (e.g. a name with a colon)."""
+    needs_quote = (
+        value == ""
+        or value != value.strip()
+        or value[0] in "!&*?|>@%#\"'[]{},`-:"
+        or ": " in value
+        or value.endswith(":")
+        or " #" in value
+        or "\n" in value
+        or "\t" in value
+    )
+    if not needs_quote:
+        return value
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def _append_task(lines: list[str], task: dict[str, Any]) -> None:

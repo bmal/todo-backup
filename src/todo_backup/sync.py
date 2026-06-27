@@ -116,31 +116,23 @@ def sync_once(graph: GraphClient, output_dir: Path) -> None:
             new_markdown_file = unique_markdown_file(todo_list.display_name, used_markdown_files).as_posix()
             snapshot = dict(snapshot)
             snapshot["list"] = {**snapshot["list"], "displayName": todo_list.display_name}
-            snapshot["synced"] = synced
             list_state["name"] = todo_list.display_name
             list_state["markdownFile"] = new_markdown_file
-            list_state["lastSynced"] = synced
             if new_markdown_file != old_markdown_file:
                 removed_files.append(old_markdown_file)
-            changed_outputs.append(
-                (
-                    snapshot,
-                    render_markdown(snapshot),
-                    list_state["snapshotFile"],
-                    new_markdown_file,
-                )
-            )
-            state_changed = True
 
         tasks_delta, delta_link = graph.task_delta_url(list_state["deltaLink"])
         updated_tasks = _apply_task_delta(snapshot.get("tasks", []), tasks_delta)
         snapshot_changed = updated_tasks != snapshot.get("tasks", [])
         delta_changed = delta_link != list_state.get("deltaLink")
 
-        if snapshot_changed:
+        # A rename and/or a task change re-renders the list exactly once.
+        if renamed or snapshot_changed:
             snapshot = dict(snapshot)
-            snapshot["tasks"] = updated_tasks
-            snapshot["synced"] = _utc_now()
+            if snapshot_changed:
+                snapshot["tasks"] = updated_tasks
+            snapshot["synced"] = synced
+            list_state["lastSynced"] = synced
             changed_outputs.append(
                 (
                     snapshot,
@@ -149,10 +141,9 @@ def sync_once(graph: GraphClient, output_dir: Path) -> None:
                     list_state["markdownFile"],
                 )
             )
+            state_changed = True
 
-        if snapshot_changed or delta_changed:
-            if snapshot_changed:
-                list_state["lastSynced"] = snapshot["synced"]
+        if delta_changed:
             list_state["deltaLink"] = delta_link
             state_changed = True
 
@@ -161,21 +152,16 @@ def sync_once(graph: GraphClient, output_dir: Path) -> None:
 
 
 def _apply_task_delta(tasks: list[dict[str, Any]], delta: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    updated = [dict(task) for task in tasks]
-    positions = {task["id"]: index for index, task in enumerate(updated)}
+    # A dict keyed by task id preserves insertion order, so edits keep their
+    # position, additions append, and removals drop out — all in O(n + m).
+    updated: dict[str, dict[str, Any]] = {task["id"]: dict(task) for task in tasks}
     for task in delta:
         task_id = task["id"]
         if "@removed" in task:
-            if task_id in positions:
-                del updated[positions[task_id]]
-                positions = {existing["id"]: index for index, existing in enumerate(updated)}
-            continue
-        if task_id in positions:
-            updated[positions[task_id]] = task
+            updated.pop(task_id, None)
         else:
-            positions[task_id] = len(updated)
-            updated.append(task)
-    return updated
+            updated[task_id] = task
+    return list(updated.values())
 
 
 def _utc_now() -> str:
@@ -183,7 +169,7 @@ def _utc_now() -> str:
 
 
 def status_lines(output_dir: Path) -> list[str]:
-    state = read_state(output_dir)
+    state = read_state_or_empty(output_dir)
     lines = []
     for list_id in sorted(state["lists"], key=lambda value: state["lists"][value]["name"]):
         list_state = state["lists"][list_id]

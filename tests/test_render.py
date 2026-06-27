@@ -57,6 +57,36 @@ synced: 2026-06-26T08:30:00Z
 """
 
 
+def test_render_omits_completed_callout_when_no_completed_tasks() -> None:
+    markdown = render_markdown(
+        {
+            "schemaVersion": 1,
+            "synced": "2026-06-26T08:30:00Z",
+            "list": {"id": "list-1", "displayName": "Inbox"},
+            "tasks": [
+                {"id": "task-1", "title": "Only open task", "status": "notStarted"},
+            ],
+        }
+    )
+
+    assert "- [ ] Only open task" in markdown
+    assert "[!done]" not in markdown
+
+
+def test_render_quotes_frontmatter_name_with_yaml_metacharacters() -> None:
+    markdown = render_markdown(
+        {
+            "schemaVersion": 1,
+            "synced": "2026-06-26T08:30:00Z",
+            "list": {"id": "list-1", "displayName": "Work: Q3 #goals"},
+            "tasks": [],
+        }
+    )
+
+    assert 'todo-list: "Work: Q3 #goals"' in markdown
+    assert "# Work: Q3 #goals" in markdown
+
+
 def test_render_html_body_as_plain_text() -> None:
     markdown = render_markdown(
         {

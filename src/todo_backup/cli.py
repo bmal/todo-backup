@@ -45,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     except AuthError as exc:
         print(f"Authentication failed: {exc}", file=sys.stderr)
         return 1
+    except ValueError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

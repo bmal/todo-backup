@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, TextIO
 
 
-AUTHORITY = "https://login.microsoftonline.com/common"
+AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["Tasks.Read", "offline_access"]
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from todo_backup.auth import StaticTokenProvider
 from todo_backup.cli import main
 from todo_backup.config import load_config
@@ -179,6 +181,40 @@ def test_status_command_prints_last_sync_and_counts(tmp_path: Path, capsys) -> N
     assert "\topen=1\tcompleted=1" in output
     assert "Projects\tlastSynced=" in output
     assert "\topen=1\tcompleted=0" in output
+
+
+def test_graph_client_gives_up_after_max_throttle_retries() -> None:
+    class AlwaysThrottled:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get(self, url: str, headers: dict[str, str]) -> dict:
+            self.calls += 1
+            raise Throttled(0)
+
+    transport = AlwaysThrottled()
+    graph = GraphClient(transport, StaticTokenProvider(), max_throttle_retries=3)
+
+    with pytest.raises(Throttled):
+        graph.lists()
+    assert transport.calls == 4  # initial attempt plus three retries
+
+
+def test_status_before_pull_is_graceful(tmp_path: Path, capsys) -> None:
+    config_path = tmp_path / "config.json"
+    output_dir = tmp_path / "out"
+    config_path.write_text(json.dumps({"clientId": "client-1", "outputDir": str(output_dir)}), encoding="utf-8")
+
+    assert main(["--config", str(config_path), "status"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_missing_client_id_reports_configuration_error(tmp_path: Path, capsys) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"outputDir": str(tmp_path / "out")}), encoding="utf-8")
+
+    assert main(["--config", str(config_path), "status"]) == 1
+    assert "Configuration error" in capsys.readouterr().err
 
 
 def test_html_body_renders_as_text_and_snapshot_preserves_original(tmp_path: Path) -> None:

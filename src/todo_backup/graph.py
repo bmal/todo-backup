@@ -30,9 +30,16 @@ class Throttled(RuntimeError):
 
 
 class GraphClient:
-    def __init__(self, transport: Transport, token_provider: TokenProvider) -> None:
+    def __init__(
+        self,
+        transport: Transport,
+        token_provider: TokenProvider,
+        *,
+        max_throttle_retries: int = 8,
+    ) -> None:
         self._transport = transport
         self._token_provider = token_provider
+        self._max_throttle_retries = max_throttle_retries
 
     def lists(self) -> list[GraphList]:
         values: list[dict[str, Any]] = []
@@ -49,7 +56,7 @@ class GraphClient:
     def task_delta_initial_url(self, list_id: str) -> str:
         query = urlencode(
             {
-                "$select": "id,title,status,body,createdDateTime,lastModifiedDateTime,dueDateTime,importance,categories,recurrence,reminderDateTime",
+                "$select": "id,title,status,body,createdDateTime,lastModifiedDateTime,completedDateTime,startDateTime,dueDateTime,isReminderOn,importance,categories,recurrence,reminderDateTime",
                 "$expand": "checklistItems",
             }
         )
@@ -73,6 +80,7 @@ class GraphClient:
         return values, delta_link
 
     def _get(self, url: str) -> dict[str, Any]:
+        attempts = 0
         while True:
             try:
                 return self._transport.get(
@@ -84,4 +92,7 @@ class GraphClient:
                     },
                 )
             except Throttled as exc:
+                attempts += 1
+                if attempts > self._max_throttle_retries:
+                    raise
                 time.sleep(exc.retry_after)
