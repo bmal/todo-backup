@@ -7,9 +7,10 @@ Python CLI that mirrors Microsoft To Do to local lossless JSON snapshots and der
 ```sh
 python -m venv .venv
 .venv/bin/pip install -e .
+source .venv/bin/activate
 ```
 
-Then either activate the virtual environment for the session (`source .venv/bin/activate`) or invoke the binary directly as `.venv/bin/todo-backup`.
+The `source` step puts `todo-backup` on your `PATH` for the current shell session. Re-run it in each new terminal, or add it to your shell profile.
 
 ## Configuration
 
