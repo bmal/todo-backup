@@ -2,6 +2,15 @@
 
 Python CLI that mirrors Microsoft To Do to local lossless JSON snapshots and derived Markdown.
 
+## Installation
+
+```sh
+python -m venv .venv
+.venv/bin/pip install -e .
+```
+
+Then either activate the virtual environment for the session (`source .venv/bin/activate`) or invoke the binary directly as `.venv/bin/todo-backup`.
+
 ## Configuration
 
 By default, `todo-backup` reads config from `~/.config/todo-backup/config.json`:
@@ -54,7 +63,7 @@ For `launchd` on macOS, save a plist like this as `~/Library/LaunchAgents/com.ex
   <string>com.example.todo-backup</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/todo-backup</string>
+    <string>/Users/you/Documents/todo-backup/.venv/bin/todo-backup</string>
     <string>--config</string>
     <string>/Users/you/.config/todo-backup/config.json</string>
     <string>sync</string>
@@ -75,5 +84,5 @@ For `launchd` on macOS, save a plist like this as `~/Library/LaunchAgents/com.ex
 For cron, run `crontab -e` and add a weekly entry:
 
 ```cron
-30 8 * * 1 /usr/local/bin/todo-backup --config /Users/you/.config/todo-backup/config.json sync
+30 8 * * 1 /Users/you/Documents/todo-backup/.venv/bin/todo-backup --config /Users/you/.config/todo-backup/config.json sync
 ```

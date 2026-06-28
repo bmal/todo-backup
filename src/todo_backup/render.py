@@ -6,7 +6,7 @@ from typing import Any
 
 def render_markdown(snapshot: dict[str, Any]) -> str:
     todo_list = snapshot["list"]
-    tasks = snapshot.get("tasks", [])
+    tasks = _dedup_recurring(snapshot.get("tasks", []))
     open_tasks = [task for task in tasks if task.get("status") != "completed"]
     completed_tasks = [task for task in tasks if task.get("status") == "completed"]
     lines = [
@@ -36,6 +36,41 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _dedup_recurring(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """For recurring tasks, keep only the most recently modified instance per title."""
+    best: dict[str, dict[str, Any]] = {}
+    for task in tasks:
+        if not task.get("recurrence"):
+            continue
+        key = task.get("title", "")
+        if key not in best or task.get("lastModifiedDateTime", "") > best[key].get("lastModifiedDateTime", ""):
+            best[key] = task
+    seen: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for task in tasks:
+        if not task.get("recurrence"):
+            result.append(task)
+        else:
+            key = task.get("title", "")
+            if best.get(key) is task and key not in seen:
+                seen.add(key)
+                result.append(task)
+    return result
+
+
+def _recurrence_label(recurrence: dict[str, Any]) -> str:
+    pattern_type = (recurrence.get("pattern") or {}).get("type", "")
+    labels: dict[str, str] = {
+        "daily": "daily",
+        "weekly": "weekly",
+        "absoluteMonthly": "monthly",
+        "relativeMonthly": "monthly",
+        "absoluteYearly": "yearly",
+        "relativeYearly": "yearly",
+    }
+    return labels.get(pattern_type, pattern_type) or "recurring"
+
+
 def _yaml_scalar(value: str) -> str:
     """Emit a frontmatter value as a plain scalar, double-quoting only when a
     plain scalar would be ambiguous or invalid YAML (e.g. a name with a colon)."""
@@ -58,6 +93,9 @@ def _yaml_scalar(value: str) -> str:
 def _append_task(lines: list[str], task: dict[str, Any]) -> None:
     checked = "x" if task.get("status") == "completed" else " "
     lines.append(f"- [{checked}] {task.get('title', '')}")
+    recurrence = task.get("recurrence")
+    if recurrence:
+        lines.append(f"  recurrence: {_recurrence_label(recurrence)}")
     body = task.get("body") or {}
     content = _body_content_for_markdown(body)
     if content:

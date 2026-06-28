@@ -87,6 +87,55 @@ def test_render_quotes_frontmatter_name_with_yaml_metacharacters() -> None:
     assert "# Work: Q3 #goals" in markdown
 
 
+def test_render_recurring_task_shows_recurrence_label() -> None:
+    markdown = render_markdown(
+        {
+            "schemaVersion": 1,
+            "synced": "2026-06-28T08:00:00Z",
+            "list": {"id": "list-1", "displayName": "Inbox"},
+            "tasks": [
+                {
+                    "id": "task-1",
+                    "title": "Weekly review",
+                    "status": "notStarted",
+                    "recurrence": {"pattern": {"type": "weekly"}, "range": {"type": "noEnd"}},
+                }
+            ],
+        }
+    )
+
+    assert "- [ ] Weekly review" in markdown
+    assert "  recurrence: weekly" in markdown
+
+
+def test_render_deduplicates_recurring_tasks_keeping_most_recent() -> None:
+    markdown = render_markdown(
+        {
+            "schemaVersion": 1,
+            "synced": "2026-06-28T08:00:00Z",
+            "list": {"id": "list-1", "displayName": "Inbox"},
+            "tasks": [
+                {
+                    "id": "task-old",
+                    "title": "Weekly review",
+                    "status": "completed",
+                    "lastModifiedDateTime": "2026-06-14T10:00:00Z",
+                    "recurrence": {"pattern": {"type": "weekly"}, "range": {"type": "noEnd"}},
+                },
+                {
+                    "id": "task-new",
+                    "title": "Weekly review",
+                    "status": "completed",
+                    "lastModifiedDateTime": "2026-06-21T10:00:00Z",
+                    "recurrence": {"pattern": {"type": "weekly"}, "range": {"type": "noEnd"}},
+                },
+            ],
+        }
+    )
+
+    assert markdown.count("Weekly review") == 1
+
+
 def test_render_html_body_as_plain_text() -> None:
     markdown = render_markdown(
         {
