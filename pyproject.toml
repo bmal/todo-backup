@@ -16,6 +16,9 @@ todo-backup = "todo_backup.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/todo_backup"]
 
+[tool.hatch.build.targets.editable]
+path = "src"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

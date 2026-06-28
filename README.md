@@ -5,7 +5,7 @@ Python CLI that mirrors Microsoft To Do to local lossless JSON snapshots and der
 ## Installation
 
 ```sh
-python -m venv .venv
+python3.13 -m venv .venv
 .venv/bin/pip install -e .
 source .venv/bin/activate
 ```
