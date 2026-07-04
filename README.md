@@ -19,15 +19,30 @@ By default, `todo-backup` reads config from `~/.config/todo-backup/config.json`:
 ```json
 {
   "clientId": "your-application-client-id",
+  "authority": "https://login.microsoftonline.com/consumers",
   "outputDir": "~/todo-backup-output",
   "tokenCachePath": "~/.local/share/todo-backup/msal_token_cache.json"
 }
 ```
 
+`authority` is optional and defaults to `https://login.microsoftonline.com/consumers`, which is for personal Microsoft accounts. For an app registered in a work/school tenant, use `https://login.microsoftonline.com/<tenant-id>` instead.
 `outputDir` is optional and defaults to `~/todo-backup-output`, intentionally outside an Obsidian vault.
 `tokenCachePath` is optional and defaults to `$XDG_DATA_HOME/todo-backup/msal_token_cache.json`, or `~/.local/share/todo-backup/msal_token_cache.json` when `XDG_DATA_HOME` is unset. The token cache is written outside this repository with user-only file permissions and should not be committed.
 
 ## Authentication
+
+### Microsoft App Registration
+
+Create or update an app registration in Microsoft Entra / Azure Portal and copy its **Application (client) ID** into `clientId`.
+
+For personal Microsoft To Do accounts, configure the app registration as follows:
+
+- **Supported account types**: choose an option that includes personal Microsoft accounts, such as **Any Entra ID Tenant + Personal Microsoft accounts**.
+- **Authentication**: enable **Allow public client flows**.
+- **Redirect URI configuration**: add `https://login.microsoftonline.com/common/oauth2/nativeclient` if the portal requires a mobile/desktop redirect URI.
+- **API permissions**: add Microsoft Graph delegated `Tasks.Read` and `offline_access`.
+
+If you change an existing single-tenant app to support personal Microsoft accounts and the portal rejects the change, set the manifest's `api.requestedAccessTokenVersion` to `2`, save, then update `signInAudience` to `AzureADandPersonalMicrosoftAccount`.
 
 Run device-code login once before pulling data:
 
@@ -35,7 +50,7 @@ Run device-code login once before pulling data:
 todo-backup --config ~/.config/todo-backup/config.json init-auth
 ```
 
-The command requests Microsoft Graph delegated `Tasks.Read` and `offline_access` scopes. Later `pull` and `sync` commands acquire and refresh tokens silently from the cache. If Microsoft no longer accepts the cached refresh token, the command fails clearly and asks you to run `init-auth` again rather than using stale credentials.
+The command requests the Microsoft Graph delegated `Tasks.Read` scope. Add both `Tasks.Read` and `offline_access` to the app registration's delegated Microsoft Graph permissions, but only `Tasks.Read` is passed to MSAL because `offline_access` is a reserved scope there. Later `pull` and `sync` commands acquire and refresh tokens silently from the cache. If Microsoft no longer accepts the cached refresh token, the command fails clearly and asks you to run `init-auth` again rather than using stale credentials.
 
 To manually confirm silent acquisition after first login, run `init-auth`, then run `todo-backup --config ~/.config/todo-backup/config.json pull` twice. The `pull` commands should not print a device-code prompt.
 
@@ -43,11 +58,17 @@ To manually confirm silent acquisition after first login, run `init-auth`, then 
 
 ```sh
 todo-backup --config ~/.config/todo-backup/config.json pull
+todo-backup --config ~/.config/todo-backup/config.json repull --yes
 todo-backup --config ~/.config/todo-backup/config.json sync
+todo-backup --config ~/.config/todo-backup/config.json render
 todo-backup --config ~/.config/todo-backup/config.json status
 ```
 
-`pull` performs the initial export and checkpoints progress so rerunning it resumes interrupted work. `sync` uses stored Graph delta links for lazy incremental refreshes. `status` reads local `state.json` and snapshots, then prints each list's last sync time plus open/completed counts.
+`pull` performs the initial export and checkpoints progress so rerunning it resumes interrupted work. `repull --yes` deletes only `outputDir`, keeps the token cache, and performs a fresh pull. `sync` uses stored Graph delta links for lazy incremental refreshes. `render` regenerates Markdown from saved JSON snapshots without contacting Microsoft Graph. `status` reads local `state.json` and snapshots, then prints each list's last sync time plus open/completed counts.
+
+Markdown output emphasizes active work: open tasks appear under `## To do`, completed tasks are kept in a collapsed `Completed` callout, and task/checklist Graph IDs are embedded as HTML comments so future tooling can map Markdown items back to Microsoft To Do objects. The JSON snapshots remain the canonical lossless backup.
+
+The Graph task delta request intentionally uses the plain `/tasks/delta` endpoint and URL-encodes list IDs. Some Microsoft To Do list IDs contain characters such as `/` or `=`, and Microsoft Graph rejects unsupported delta query options such as `$expand=checklistItems`.
 
 ## Weekly Scheduling
 

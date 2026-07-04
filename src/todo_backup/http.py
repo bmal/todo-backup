@@ -5,7 +5,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from todo_backup.graph import Throttled
+from todo_backup.graph import GraphApiError, Throttled
 
 
 class UrlLibTransport:
@@ -21,4 +21,18 @@ class UrlLibTransport:
             if exc.code == 429:
                 retry_after = exc.headers.get("Retry-After", "1")
                 raise Throttled(int(retry_after)) from exc
-            raise
+            body = exc.read().decode("utf-8", errors="replace")
+            raise GraphApiError(f"Microsoft Graph returned HTTP {exc.code} for {url}: {_error_message(body)}") from exc
+
+
+def _error_message(body: str) -> str:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return body.strip() or "No response body"
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("code")
+        if message:
+            return str(message)
+    return body.strip() or "No response body"

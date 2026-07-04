@@ -18,12 +18,17 @@ def render_markdown(snapshot: dict[str, Any]) -> str:
         "",
         f"# {todo_list['displayName']}",
         "",
+        f"## To do ({len(open_tasks)})",
+        "",
     ]
 
     for task in open_tasks:
         _append_task(lines, task)
 
     if completed_tasks:
+        if not open_tasks:
+            lines.pop()
+            lines.pop()
         lines.append(f"> [!done]- Completed ({len(completed_tasks)})")
         for task in completed_tasks:
             quoted: list[str] = []
@@ -92,7 +97,13 @@ def _yaml_scalar(value: str) -> str:
 
 def _append_task(lines: list[str], task: dict[str, Any]) -> None:
     checked = "x" if task.get("status") == "completed" else " "
+    task_id = task.get("id")
+    if task_id:
+        lines.append(f"<!-- todo-task-id: {task_id} -->")
     lines.append(f"- [{checked}] {task.get('title', '')}")
+    metadata = _task_metadata(task)
+    if metadata:
+        lines.append(f"  _{'; '.join(metadata)}_")
     recurrence = task.get("recurrence")
     if recurrence:
         lines.append(f"  recurrence: {_recurrence_label(recurrence)}")
@@ -103,8 +114,35 @@ def _append_task(lines: list[str], task: dict[str, Any]) -> None:
             lines.append(f"  {body_line}")
     for checklist_item in task.get("checklistItems", []):
         item_checked = "x" if checklist_item.get("isChecked") else " "
+        item_id = checklist_item.get("id")
+        if item_id:
+            lines.append(f"  <!-- todo-checklist-item-id: {item_id} -->")
         lines.append(f"  - [{item_checked}] {checklist_item.get('displayName', '')}")
     lines.append("")
+
+
+def _task_metadata(task: dict[str, Any]) -> list[str]:
+    metadata: list[str] = []
+    due = _date_time_label(task.get("dueDateTime"))
+    if due:
+        metadata.append(f"due: {due}")
+    reminder = _date_time_label(task.get("reminderDateTime"))
+    if reminder:
+        metadata.append(f"reminder: {reminder}")
+    categories = task.get("categories") or []
+    if categories:
+        metadata.append("categories: " + ", ".join(str(category) for category in categories))
+    return metadata
+
+
+def _date_time_label(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    date_time = value.get("dateTime")
+    if not date_time:
+        return ""
+    timezone = value.get("timeZone")
+    return f"{date_time} {timezone}" if timezone else str(date_time)
 
 
 def _body_content_for_markdown(body: dict[str, Any]) -> str:

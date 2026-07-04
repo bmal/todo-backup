@@ -8,7 +8,7 @@ from typing import Any, Callable, Mapping, TextIO
 
 
 AUTHORITY = "https://login.microsoftonline.com/consumers"
-SCOPES = ["Tasks.Read", "offline_access"]
+SCOPES = ["Tasks.Read"]
 
 
 class AuthError(RuntimeError):
@@ -28,6 +28,7 @@ class DeviceCodeTokenProvider:
         self,
         client_id: str,
         cache_path: Path,
+        authority: str = AUTHORITY,
         *,
         app_factory: Callable[..., Any] | None = None,
         cache_factory: Callable[[], Any] | None = None,
@@ -35,7 +36,7 @@ class DeviceCodeTokenProvider:
         self._cache_path = cache_path
         self._cache = _load_cache(cache_path, cache_factory or _msal_cache_factory)
         factory = app_factory or _msal_app_factory
-        self._app = factory(client_id=client_id, authority=AUTHORITY, token_cache=self._cache)
+        self._app = factory(client_id=client_id, authority=authority, token_cache=self._cache)
 
     def access_token(self) -> str:
         accounts = self._app.get_accounts()
@@ -58,6 +59,7 @@ class DeviceCodeTokenProvider:
 def init_device_code_auth(
     client_id: str,
     cache_path: Path,
+    authority: str = AUTHORITY,
     *,
     app_factory: Callable[..., Any] | None = None,
     cache_factory: Callable[[], Any] | None = None,
@@ -65,7 +67,7 @@ def init_device_code_auth(
 ) -> None:
     token_cache = _load_cache(cache_path, cache_factory or _msal_cache_factory)
     factory = app_factory or _msal_app_factory
-    app = factory(client_id=client_id, authority=AUTHORITY, token_cache=token_cache)
+    app = factory(client_id=client_id, authority=authority, token_cache=token_cache)
 
     flow = app.initiate_device_flow(scopes=SCOPES)
     if "user_code" not in flow:

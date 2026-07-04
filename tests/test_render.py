@@ -44,14 +44,21 @@ synced: 2026-06-26T08:30:00Z
 
 # Inbox
 
+## To do (2)
+
+<!-- todo-task-id: task-1 -->
 - [ ] Open task
   Open body
+  <!-- todo-checklist-item-id: step-1 -->
   - [x] Done step
+  <!-- todo-checklist-item-id: step-2 -->
   - [ ] Open step
 
+<!-- todo-task-id: task-3 -->
 - [ ] Another open task
 
 > [!done]- Completed (1)
+> <!-- todo-task-id: task-2 -->
 > - [x] Done task
 >   Done body
 """
@@ -70,7 +77,47 @@ def test_render_omits_completed_callout_when_no_completed_tasks() -> None:
     )
 
     assert "- [ ] Only open task" in markdown
+    assert "## To do (1)" in markdown
     assert "[!done]" not in markdown
+
+
+def test_render_completed_only_list_omits_empty_to_do_section() -> None:
+    markdown = render_markdown(
+        {
+            "schemaVersion": 1,
+            "synced": "2026-06-26T08:30:00Z",
+            "list": {"id": "list-1", "displayName": "Inbox"},
+            "tasks": [
+                {"id": "task-1", "title": "Done task", "status": "completed"},
+            ],
+        }
+    )
+
+    assert "## To do" not in markdown
+    assert "> [!done]- Completed (1)" in markdown
+
+
+def test_render_includes_task_metadata() -> None:
+    markdown = render_markdown(
+        {
+            "schemaVersion": 1,
+            "synced": "2026-06-26T08:30:00Z",
+            "list": {"id": "list-1", "displayName": "Inbox"},
+            "tasks": [
+                {
+                    "id": "task-1",
+                    "title": "Timed task",
+                    "status": "notStarted",
+                    "dueDateTime": {"dateTime": "2026-07-01T10:00:00", "timeZone": "UTC"},
+                    "reminderDateTime": {"dateTime": "2026-06-30T09:00:00", "timeZone": "UTC"},
+                    "categories": ["home", "urgent"],
+                },
+            ],
+        }
+    )
+
+    assert "<!-- todo-task-id: task-1 -->" in markdown
+    assert "  _due: 2026-07-01T10:00:00 UTC; reminder: 2026-06-30T09:00:00 UTC; categories: home, urgent_" in markdown
 
 
 def test_render_quotes_frontmatter_name_with_yaml_metacharacters() -> None:

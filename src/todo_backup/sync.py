@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import shutil
 from typing import Any
 
 from todo_backup.graph import GraphClient
@@ -149,6 +150,28 @@ def sync_once(graph: GraphClient, output_dir: Path) -> None:
 
     if changed_outputs or removed_files or state_changed:
         write_sync_output(output_dir, state, changed_outputs, removed_files)
+
+
+def render_once(output_dir: Path) -> None:
+    state = read_state(output_dir)
+    outputs = []
+    for list_state in state["lists"].values():
+        snapshot = read_snapshot(output_dir, list_state["snapshotFile"])
+        outputs.append((snapshot, render_markdown(snapshot), list_state["snapshotFile"], list_state["markdownFile"]))
+    write_sync_output(output_dir, state, outputs)
+
+
+def repull_once(graph: GraphClient, output_dir: Path) -> None:
+    _validate_repull_target(output_dir)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    pull_once(graph, output_dir)
+
+
+def _validate_repull_target(output_dir: Path) -> None:
+    target = output_dir.expanduser().resolve()
+    if target in {Path("/").resolve(), Path.home().resolve()}:
+        raise ValueError(f"Refusing to delete unsafe outputDir: {output_dir}")
 
 
 def _apply_task_delta(tasks: list[dict[str, Any]], delta: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -9,7 +9,7 @@ from todo_backup.auth import StaticTokenProvider
 from todo_backup.cli import main
 from todo_backup.config import load_config
 from todo_backup.graph import GRAPH_ROOT, GraphClient, Throttled
-from todo_backup.sync import pull_once
+from todo_backup.sync import pull_once, repull_once
 
 
 class FakeTransport:
@@ -207,6 +207,31 @@ def test_status_before_pull_is_graceful(tmp_path: Path, capsys) -> None:
 
     assert main(["--config", str(config_path), "status"]) == 0
     assert capsys.readouterr().out == ""
+
+
+def test_repull_requires_confirmation(tmp_path: Path, capsys) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"clientId": "client-1", "outputDir": str(tmp_path / "out")}), encoding="utf-8")
+
+    assert main(["--config", str(config_path), "repull"]) == 1
+    assert "without --yes" in capsys.readouterr().err
+
+
+def test_repull_deletes_output_before_fresh_pull(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    stale_file = output_dir / "stale.txt"
+    stale_file.parent.mkdir(parents=True)
+    stale_file.write_text("stale", encoding="utf-8")
+
+    repull_once(GraphClient(FakeTransport(), StaticTokenProvider()), output_dir)
+
+    assert not stale_file.exists()
+    assert (output_dir / "state.json").exists()
+
+
+def test_repull_refuses_home_directory(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unsafe outputDir"):
+        repull_once(GraphClient(FakeTransport(), StaticTokenProvider()), Path.home())
 
 
 def test_missing_client_id_reports_configuration_error(tmp_path: Path, capsys) -> None:

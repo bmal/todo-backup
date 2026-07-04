@@ -162,6 +162,23 @@ def test_app_factory_receives_client_authority_and_cache(tmp_path: Path) -> None
     assert received == {"client_id": "client-1", "authority": AUTHORITY, "token_cache": cache}
 
 
+def test_app_factory_receives_custom_authority(tmp_path: Path) -> None:
+    received: dict = {}
+    authority = "https://login.microsoftonline.com/tenant-1"
+
+    def app_factory(*, client_id: str, authority: str, token_cache: FakeTokenCache) -> FakeMsalApp:
+        received.update({"client_id": client_id, "authority": authority, "token_cache": token_cache})
+        return FakeMsalApp(accounts=[{}], silent_result={"access_token": "token"})
+
+    cache = FakeTokenCache()
+
+    DeviceCodeTokenProvider(
+        "client-1", tmp_path / "msal.json", authority, app_factory=app_factory, cache_factory=lambda: cache
+    )
+
+    assert received == {"client_id": "client-1", "authority": authority, "token_cache": cache}
+
+
 def _factory_for(app: FakeMsalApp):
     def app_factory(*, client_id: str, authority: str, token_cache: FakeTokenCache) -> FakeMsalApp:
         assert client_id == "client-1"
