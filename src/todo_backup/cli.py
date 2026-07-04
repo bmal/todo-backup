@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
             graph = GraphClient(
                 UrlLibTransport(), DeviceCodeTokenProvider(config.client_id, config.token_cache_path, config.authority)
             )
-            pull_once(graph, config.output_dir)
+            pull_once(graph, config.output_dir, config.list_directories, config.require_list_directories)
             return 0
         if args.command == "repull":
             if not args.yes:
@@ -45,16 +45,16 @@ def main(argv: list[str] | None = None) -> int:
             graph = GraphClient(
                 UrlLibTransport(), DeviceCodeTokenProvider(config.client_id, config.token_cache_path, config.authority)
             )
-            repull_once(graph, config.output_dir)
+            repull_once(graph, config.output_dir, config.list_directories, config.require_list_directories)
             return 0
         if args.command == "sync":
             graph = GraphClient(
                 UrlLibTransport(), DeviceCodeTokenProvider(config.client_id, config.token_cache_path, config.authority)
             )
-            sync_once(graph, config.output_dir)
+            sync_once(graph, config.output_dir, config.list_directories, config.require_list_directories)
             return 0
         if args.command == "render":
-            render_once(config.output_dir)
+            render_once(config.output_dir, config.list_directories, config.require_list_directories)
             return 0
         if args.command == "status":
             for line in status_lines(config.output_dir):

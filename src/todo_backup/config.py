@@ -18,6 +18,8 @@ class Config:
     output_dir: Path
     token_cache_path: Path
     authority: str
+    list_directories: dict[str, str]
+    require_list_directories: bool
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -35,4 +37,19 @@ def load_config(path: Path | None = None) -> Config:
     token_cache = data.get("tokenCachePath") or data.get("token_cache_path")
     token_cache_path = Path(token_cache).expanduser() if token_cache else default_token_cache_path()
     authority = data.get("authority") or DEFAULT_AUTHORITY
-    return Config(client_id=client_id, output_dir=output_dir, token_cache_path=token_cache_path, authority=authority)
+    list_directories = data.get("listDirectories") or data.get("list_directories") or {}
+    if not isinstance(list_directories, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in list_directories.items()
+    ):
+        raise ValueError("listDirectories must be an object mapping list names to directory names")
+    require_list_directories = data.get("requireListDirectories") or data.get("require_list_directories") or False
+    if not isinstance(require_list_directories, bool):
+        raise ValueError("requireListDirectories must be true or false")
+    return Config(
+        client_id=client_id,
+        output_dir=output_dir,
+        token_cache_path=token_cache_path,
+        authority=authority,
+        list_directories=list_directories,
+        require_list_directories=require_list_directories,
+    )

@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import shutil
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from todo_backup.graph import GraphClient
 from todo_backup.render import render_markdown
 from todo_backup.store import (
     make_repull_staging,
+    matches_markdown_file,
     read_snapshot,
     read_state,
     read_state_or_empty,
@@ -29,7 +30,12 @@ class PullSummary:
         return f"Backed up {self.list_count} lists and {self.task_count} tasks."
 
 
-def pull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
+def pull_once(
+    graph: GraphClient,
+    output_dir: Path,
+    list_directories: Mapping[str, str] | None = None,
+    require_list_directories: bool = False,
+) -> PullSummary:
     state = read_state_or_empty(output_dir)
     synced = _utc_now()
     used_markdown_files = {
@@ -38,6 +44,7 @@ def pull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
         if "markdownFile" in list_state
     }
     todo_lists = graph.lists()
+    _validate_list_directories((todo_list.display_name for todo_list in todo_lists), list_directories, require_list_directories)
     task_count = 0
     for todo_list in todo_lists:
         existing = state["lists"].get(todo_list.id)
@@ -51,7 +58,7 @@ def pull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
             url = existing.get("pullNextLink") or graph.task_delta_initial_url(todo_list.id)
         else:
             snapshot_file = (Path("snapshots") / f"{todo_list.id}.json").as_posix()
-            markdown_file = unique_markdown_file(todo_list.display_name, used_markdown_files).as_posix()
+            markdown_file = _markdown_file_for_list(todo_list.display_name, used_markdown_files, list_directories).as_posix()
             snapshot = {
                 "schemaVersion": 1,
                 "synced": synced,
@@ -92,19 +99,33 @@ def pull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
     return summary
 
 
-def sync_once(graph: GraphClient, output_dir: Path) -> None:
+def sync_once(
+    graph: GraphClient,
+    output_dir: Path,
+    list_directories: Mapping[str, str] | None = None,
+    require_list_directories: bool = False,
+) -> None:
     state = read_state(output_dir)
     current_lists = {todo_list.id: todo_list for todo_list in graph.lists()}
+    _validate_list_directories(
+        (todo_list.display_name for todo_list in current_lists.values()), list_directories, require_list_directories
+    )
     changed_outputs = []
     removed_files: list[str] = []
     state_changed = False
     synced = _utc_now()
 
-    used_markdown_files = {
-        Path(list_state["markdownFile"])
+    reserved_markdown_files = {
+        list_id: Path(list_state["markdownFile"])
         for list_id, list_state in state["lists"].items()
-        if list_id in current_lists and list_state["name"] == current_lists[list_id].display_name
+        if list_id in current_lists
+        and matches_markdown_file(
+            current_lists[list_id].display_name,
+            list_state["markdownFile"],
+            _list_directory(current_lists[list_id].display_name, list_directories),
+        )
     }
+    used_markdown_files = set(reserved_markdown_files.values())
 
     for list_id in list(state["lists"]):
         if list_id in current_lists:
@@ -123,7 +144,7 @@ def sync_once(graph: GraphClient, output_dir: Path) -> None:
                 "tasks": tasks,
             }
             snapshot_file = (Path("snapshots") / f"{list_id}.json").as_posix()
-            markdown_file = unique_markdown_file(todo_list.display_name, used_markdown_files).as_posix()
+            markdown_file = _markdown_file_for_list(todo_list.display_name, used_markdown_files, list_directories).as_posix()
             state["lists"][list_id] = {
                 "name": todo_list.display_name,
                 "markdownFile": markdown_file,
@@ -138,9 +159,13 @@ def sync_once(graph: GraphClient, output_dir: Path) -> None:
         list_state = state["lists"][list_id]
         snapshot = read_snapshot(output_dir, list_state["snapshotFile"])
         renamed = list_state["name"] != todo_list.display_name
-        if renamed:
-            old_markdown_file = list_state["markdownFile"]
-            new_markdown_file = unique_markdown_file(todo_list.display_name, used_markdown_files).as_posix()
+        old_markdown_file = list_state["markdownFile"]
+        new_markdown_file = reserved_markdown_files.get(list_id) or _markdown_file_for_list(
+            todo_list.display_name, used_markdown_files, list_directories
+        )
+        new_markdown_file = new_markdown_file.as_posix()
+        moved = old_markdown_file != new_markdown_file
+        if renamed or moved:
             snapshot = dict(snapshot)
             snapshot["list"] = {**snapshot["list"], "displayName": todo_list.display_name}
             list_state["name"] = todo_list.display_name
@@ -153,8 +178,8 @@ def sync_once(graph: GraphClient, output_dir: Path) -> None:
         snapshot_changed = updated_tasks != snapshot.get("tasks", [])
         delta_changed = delta_link != list_state.get("deltaLink")
 
-        # A rename and/or a task change re-renders the list exactly once.
-        if renamed or snapshot_changed:
+        # A path change, rename, and/or task change re-renders the list exactly once.
+        if renamed or moved or snapshot_changed:
             snapshot = dict(snapshot)
             if snapshot_changed:
                 snapshot["tasks"] = updated_tasks
@@ -178,20 +203,48 @@ def sync_once(graph: GraphClient, output_dir: Path) -> None:
         write_sync_output(output_dir, state, changed_outputs, removed_files)
 
 
-def render_once(output_dir: Path) -> None:
+def render_once(
+    output_dir: Path,
+    list_directories: Mapping[str, str] | None = None,
+    require_list_directories: bool = False,
+) -> None:
     state = read_state(output_dir)
+    _validate_list_directories(
+        (list_state["name"] for list_state in state["lists"].values()), list_directories, require_list_directories
+    )
     outputs = []
-    for list_state in state["lists"].values():
+    removed_files: list[str] = []
+    reserved_markdown_files = {
+        list_id: Path(list_state["markdownFile"])
+        for list_id, list_state in state["lists"].items()
+        if matches_markdown_file(
+            list_state["name"], list_state["markdownFile"], _list_directory(list_state["name"], list_directories)
+        )
+    }
+    used_markdown_files = set(reserved_markdown_files.values())
+    for list_id, list_state in state["lists"].items():
         snapshot = read_snapshot(output_dir, list_state["snapshotFile"])
+        markdown_file = reserved_markdown_files.get(list_id) or _markdown_file_for_list(
+            list_state["name"], used_markdown_files, list_directories
+        )
+        markdown_file = markdown_file.as_posix()
+        if markdown_file != list_state["markdownFile"]:
+            removed_files.append(list_state["markdownFile"])
+            list_state["markdownFile"] = markdown_file
         outputs.append((snapshot, render_markdown(snapshot), list_state["snapshotFile"], list_state["markdownFile"]))
-    write_sync_output(output_dir, state, outputs)
+    write_sync_output(output_dir, state, outputs, removed_files)
 
 
-def repull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
+def repull_once(
+    graph: GraphClient,
+    output_dir: Path,
+    list_directories: Mapping[str, str] | None = None,
+    require_list_directories: bool = False,
+) -> PullSummary:
     _validate_repull_target(output_dir)
     staging = make_repull_staging(output_dir)
     try:
-        summary = pull_once(graph, staging)
+        summary = pull_once(graph, staging, list_directories, require_list_directories)
         swap_repull_into_place(staging, output_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -216,6 +269,31 @@ def _apply_task_delta(tasks: list[dict[str, Any]], delta: list[dict[str, Any]]) 
         else:
             updated[task_id] = task
     return list(updated.values())
+
+
+def _markdown_file_for_list(list_name: str, used: set[Path], list_directories: Mapping[str, str] | None) -> Path:
+    return unique_markdown_file(list_name, used, _list_directory(list_name, list_directories))
+
+
+def _list_directory(list_name: str, list_directories: Mapping[str, str] | None) -> str:
+    return (list_directories or {}).get(list_name, "")
+
+
+def _validate_list_directories(
+    list_names: Iterable[str],
+    list_directories: Mapping[str, str] | None,
+    require_list_directories: bool,
+) -> None:
+    if not require_list_directories:
+        return
+    configured = list_directories or {}
+    missing = sorted({list_name for list_name in list_names if list_name not in configured})
+    if missing:
+        joined = ", ".join(repr(name) for name in missing)
+        raise ValueError(
+            "Unmapped Microsoft To Do lists: "
+            f"{joined}. Add each list to listDirectories or set requireListDirectories to false."
+        )
 
 
 def _utc_now() -> str:

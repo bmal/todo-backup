@@ -135,6 +135,45 @@ def test_pull_writes_snapshot_markdown_and_state(tmp_path: Path) -> None:
     assert any(url == f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?page=2" for url, _headers in transport.requests)
 
 
+def test_config_loads_list_directory_mapping(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    output_dir = tmp_path / "out"
+    config_path.write_text(
+        json.dumps(
+            {
+                "clientId": "client-1",
+                "outputDir": str(output_dir),
+                "listDirectories": {"Inbox": "Archive", "Projects": "On hold"},
+                "requireListDirectories": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.list_directories == {"Inbox": "Archive", "Projects": "On hold"}
+    assert config.require_list_directories is True
+
+
+def test_config_rejects_invalid_list_directory_mapping(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({"clientId": "client-1", "listDirectories": ["Inbox"]}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="listDirectories"):
+        load_config(config_path)
+
+
+def test_config_rejects_invalid_require_list_directories(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"clientId": "client-1", "requireListDirectories": "yes"}), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="requireListDirectories"):
+        load_config(config_path)
+
+
 class TruncatingListsTransport:
     """Plain /me/todo/lists truncates; /me/todo/lists/delta returns everything."""
 

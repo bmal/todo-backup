@@ -91,15 +91,26 @@ def swap_repull_into_place(staging: Path, output_dir: Path) -> None:
     shutil.rmtree(old, ignore_errors=True)
 
 
-def unique_markdown_file(list_name: str, used: set[Path]) -> Path:
+def unique_markdown_file(list_name: str, used: set[Path], list_directory: str = "") -> Path:
     stem = _slugify(list_name)
-    markdown_file = Path("lists") / f"{stem}.md"
+    directory = _markdown_directory(list_directory)
+    markdown_file = directory / f"{stem}.md"
     suffix = 2
     while markdown_file in used:
-        markdown_file = Path("lists") / f"{stem}-{suffix}.md"
+        markdown_file = directory / f"{stem}-{suffix}.md"
         suffix += 1
     used.add(markdown_file)
     return markdown_file
+
+
+def matches_markdown_file(list_name: str, markdown_file: str, list_directory: str = "") -> bool:
+    path = Path(markdown_file)
+    stem = _slugify(list_name)
+    return path.parent == _markdown_directory(list_directory) and re.fullmatch(rf"{re.escape(stem)}(?:-\d+)?\.md", path.name)
+
+
+def _markdown_directory(list_directory: str) -> Path:
+    return Path("lists") / _slugify(list_directory) if list_directory else Path("lists")
 
 
 def _slugify(value: str) -> str:

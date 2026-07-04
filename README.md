@@ -21,13 +21,20 @@ By default, `todo-backup` reads config from `~/.config/todo-backup/config.json`:
   "clientId": "your-application-client-id",
   "authority": "https://login.microsoftonline.com/consumers",
   "outputDir": "~/todo-backup-output",
-  "tokenCachePath": "~/.local/share/todo-backup/msal_token_cache.json"
+  "tokenCachePath": "~/.local/share/todo-backup/msal_token_cache.json",
+  "listDirectories": {
+    "Someday": "On hold",
+    "Old tasks": "Archive"
+  },
+  "requireListDirectories": true
 }
 ```
 
 `authority` is optional and defaults to `https://login.microsoftonline.com/consumers`, which is for personal Microsoft accounts. For an app registered in a work/school tenant, use `https://login.microsoftonline.com/<tenant-id>` instead.
 `outputDir` is optional and defaults to `~/todo-backup-output`, intentionally outside an Obsidian vault.
 `tokenCachePath` is optional and defaults to `$XDG_DATA_HOME/todo-backup/msal_token_cache.json`, or `~/.local/share/todo-backup/msal_token_cache.json` when `XDG_DATA_HOME` is unset. The token cache is written outside this repository with user-only file permissions and should not be committed.
+`listDirectories` is optional. It maps exact Microsoft To Do list names to subdirectories under `lists/`, so a mapping of `"Someday": "On hold"` writes `lists/On hold/Someday.md`. Unmapped lists continue to write directly under `lists/`.
+`requireListDirectories` is optional and defaults to `false`. When `true`, `pull`, `sync`, and `render` fail before writing Markdown if any Microsoft To Do list is missing from `listDirectories`.
 
 ## Authentication
 

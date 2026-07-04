@@ -5,7 +5,7 @@ from pathlib import Path
 
 from todo_backup.auth import StaticTokenProvider
 from todo_backup.graph import GRAPH_ROOT, GraphClient
-from todo_backup.sync import pull_once, sync_once
+from todo_backup.sync import pull_once, render_once, sync_once
 
 
 class SyncFakeTransport:
@@ -242,6 +242,88 @@ def test_sync_deletes_removed_list_files_and_state(tmp_path: Path) -> None:
     assert not (output_dir / "lists" / "Inbox.md").exists()
     state = _read_json(output_dir / "state.json")
     assert state["lists"] == {}
+
+
+def test_pull_writes_mapped_lists_under_configured_directories(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    transport = SyncFakeTransport(
+        {"value": [], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/unused"},
+        list_payloads=[[{"id": "list-1", "displayName": "Inbox"}]],
+    )
+
+    pull_once(GraphClient(transport, StaticTokenProvider()), output_dir, {"Inbox": "On hold"})
+
+    assert not (output_dir / "lists" / "Inbox.md").exists()
+    markdown = (output_dir / "lists" / "On hold" / "Inbox.md").read_text(encoding="utf-8")
+    assert "todo-list: Inbox" in markdown
+    state = _read_json(output_dir / "state.json")
+    assert state["lists"]["list-1"]["markdownFile"] == "lists/On hold/Inbox.md"
+
+
+def test_sync_moves_markdown_when_directory_mapping_changes(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    transport = SyncFakeTransport(
+        {
+            "value": [],
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=unchanged",
+        }
+    )
+    pull_once(GraphClient(transport, StaticTokenProvider()), output_dir)
+    assert (output_dir / "lists" / "Inbox.md").exists()
+
+    sync_once(GraphClient(transport, StaticTokenProvider()), output_dir, {"Inbox": "Archive"})
+
+    assert not (output_dir / "lists" / "Inbox.md").exists()
+    assert (output_dir / "lists" / "Archive" / "Inbox.md").exists()
+    state = _read_json(output_dir / "state.json")
+    assert state["lists"]["list-1"]["markdownFile"] == "lists/Archive/Inbox.md"
+
+
+def test_render_moves_markdown_when_directory_mapping_changes(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    pull_once(GraphClient(SyncFakeTransport({"value": [], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/unused"}), StaticTokenProvider()), output_dir)
+
+    render_once(output_dir, {"Inbox": "Later"})
+
+    assert not (output_dir / "lists" / "Inbox.md").exists()
+    assert (output_dir / "lists" / "Later" / "Inbox.md").exists()
+    state = _read_json(output_dir / "state.json")
+    assert state["lists"]["list-1"]["markdownFile"] == "lists/Later/Inbox.md"
+
+
+def test_pull_strict_directory_mapping_rejects_unmapped_lists(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    transport = SyncFakeTransport(
+        {"value": [], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/unused"},
+        list_payloads=[[{"id": "list-1", "displayName": "Inbox"}, {"id": "list-2", "displayName": "Projects"}]],
+    )
+
+    try:
+        pull_once(GraphClient(transport, StaticTokenProvider()), output_dir, {"Inbox": "GTD"}, True)
+    except ValueError as exc:
+        assert "Unmapped Microsoft To Do lists: 'Projects'" in str(exc)
+    else:
+        raise AssertionError("Expected unmapped list error")
+
+    assert not (output_dir / "state.json").exists()
+
+
+def test_render_strict_directory_mapping_rejects_unmapped_lists(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    pull_once(
+        GraphClient(
+            SyncFakeTransport({"value": [], "@odata.deltaLink": "https://graph.microsoft.com/v1.0/unused"}),
+            StaticTokenProvider(),
+        ),
+        output_dir,
+    )
+
+    try:
+        render_once(output_dir, {}, True)
+    except ValueError as exc:
+        assert "Unmapped Microsoft To Do lists: 'Inbox'" in str(exc)
+    else:
+        raise AssertionError("Expected unmapped list error")
 
 
 def _initial_list_1_payload() -> dict:
