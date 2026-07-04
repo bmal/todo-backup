@@ -61,7 +61,7 @@ class GraphClient:
                 if "@removed" in value:
                     seen.pop(list_id, None)
                     continue
-                seen[list_id] = GraphList(id=list_id, display_name=value["displayName"])
+                seen[list_id] = GraphList(id=list_id, display_name=value.get("displayName", ""))
             url = payload.get("@odata.nextLink")
         return list(seen.values())
 

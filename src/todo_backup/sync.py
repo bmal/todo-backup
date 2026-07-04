@@ -192,10 +192,10 @@ def repull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
     staging = make_repull_staging(output_dir)
     try:
         summary = pull_once(graph, staging)
+        swap_repull_into_place(staging, output_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    swap_repull_into_place(staging, output_dir)
     return summary
 
 

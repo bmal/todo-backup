@@ -197,6 +197,20 @@ def test_lists_dedupes_by_id_and_skips_removed() -> None:
     ]
 
 
+class MissingDisplayNameTransport:
+    def get(self, url: str, headers: dict[str, str]) -> dict:
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
+            return {"value": [{"id": "list-1"}]}
+        raise AssertionError(f"Unexpected URL: {url}")
+
+
+def test_lists_tolerates_entry_without_display_name() -> None:
+    # A malformed delta entry lacking displayName must not crash enumeration.
+    lists = GraphClient(MissingDisplayNameTransport(), StaticTokenProvider()).lists()
+
+    assert [(todo_list.id, todo_list.display_name) for todo_list in lists] == [("list-1", "")]
+
+
 def test_pull_prints_completion_summary(tmp_path: Path, capsys) -> None:
     output_dir = tmp_path / "out"
 
