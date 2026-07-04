@@ -18,18 +18,20 @@ class FakeTransport:
 
     def get(self, url: str, headers: dict[str, str]) -> dict:
         self.requests.append((url, headers))
+        # The plain collection endpoint truncates (only list-1, no nextLink);
+        # relying on it would silently drop list-2. The delta endpoint returns
+        # the full set across two nextLink pages.
         if url == f"{GRAPH_ROOT}/me/todo/lists":
+            return {"value": [{"id": "list-1", "displayName": "Inbox"}]}
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
             return {
-                "value": [
-                    {
-                        "id": "list-1",
-                        "displayName": "Inbox",
-                    },
-                    {
-                        "id": "list-2",
-                        "displayName": "Projects",
-                    }
-                ]
+                "value": [{"id": "list-1", "displayName": "Inbox"}],
+                "@odata.nextLink": f"{GRAPH_ROOT}/me/todo/lists/delta?page=2",
+            }
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta?page=2":
+            return {
+                "value": [{"id": "list-2", "displayName": "Projects"}],
+                "@odata.deltaLink": f"{GRAPH_ROOT}/me/todo/lists/delta?$deltatoken=lists",
             }
         if url == f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?page=2":
             return {
@@ -44,7 +46,7 @@ class FakeTransport:
                 ],
                 "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=abc",
             }
-        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?"):
+        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta"):
             return {
                 "value": [
                     {
@@ -64,7 +66,7 @@ class FakeTransport:
                 ],
                 "@odata.nextLink": f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?page=2",
             }
-        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-2/tasks/delta?"):
+        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-2/tasks/delta"):
             return {
                 "value": [
                     {
@@ -131,6 +133,87 @@ def test_pull_writes_snapshot_markdown_and_state(tmp_path: Path) -> None:
 
     assert transport.requests[0][1]["Authorization"] == "Bearer static-test-token"
     assert any(url == f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?page=2" for url, _headers in transport.requests)
+
+
+class TruncatingListsTransport:
+    """Plain /me/todo/lists truncates; /me/todo/lists/delta returns everything."""
+
+    def __init__(self) -> None:
+        self.plain_list_calls = 0
+
+    def get(self, url: str, headers: dict[str, str]) -> dict:
+        if url == f"{GRAPH_ROOT}/me/todo/lists":
+            self.plain_list_calls += 1
+            return {"value": [{"id": "list-1", "displayName": "Inbox"}]}
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
+            return {
+                "value": [{"id": "list-1", "displayName": "Inbox"}],
+                "@odata.nextLink": f"{GRAPH_ROOT}/me/todo/lists/delta?page=2",
+            }
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta?page=2":
+            return {
+                "value": [{"id": "list-2", "displayName": "Projects"}],
+                "@odata.nextLink": f"{GRAPH_ROOT}/me/todo/lists/delta?page=3",
+            }
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta?page=3":
+            return {
+                "value": [{"id": "list-3", "displayName": "Errands"}],
+                "@odata.deltaLink": f"{GRAPH_ROOT}/me/todo/lists/delta?$deltatoken=done",
+            }
+        raise AssertionError(f"Unexpected URL: {url}")
+
+
+def test_lists_enumerates_full_set_via_delta_not_truncating_endpoint() -> None:
+    transport = TruncatingListsTransport()
+
+    lists = GraphClient(transport, StaticTokenProvider()).lists()
+
+    assert [todo_list.id for todo_list in lists] == ["list-1", "list-2", "list-3"]
+    # The truncating collection endpoint must never be consulted.
+    assert transport.plain_list_calls == 0
+
+
+class RemovedAndDuplicateListsTransport:
+    def get(self, url: str, headers: dict[str, str]) -> dict:
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
+            return {
+                "value": [
+                    {"id": "list-1", "displayName": "Inbox"},
+                    {"id": "list-1", "displayName": "Inbox"},
+                    {"id": "list-2", "displayName": "Projects"},
+                    {"id": "list-2", "@removed": {"reason": "deleted"}},
+                    {"id": "list-3", "displayName": "Errands"},
+                ],
+            }
+        raise AssertionError(f"Unexpected URL: {url}")
+
+
+def test_lists_dedupes_by_id_and_skips_removed() -> None:
+    lists = GraphClient(RemovedAndDuplicateListsTransport(), StaticTokenProvider()).lists()
+
+    assert [(todo_list.id, todo_list.display_name) for todo_list in lists] == [
+        ("list-1", "Inbox"),
+        ("list-3", "Errands"),
+    ]
+
+
+def test_pull_prints_completion_summary(tmp_path: Path, capsys) -> None:
+    output_dir = tmp_path / "out"
+
+    summary = pull_once(GraphClient(FakeTransport(), StaticTokenProvider()), output_dir)
+
+    assert summary.list_count == 2
+    assert summary.task_count == 3
+    assert "Backed up 2 lists and 3 tasks." in capsys.readouterr().out
+
+
+def test_repull_prints_completion_summary(tmp_path: Path, capsys) -> None:
+    output_dir = tmp_path / "out"
+
+    summary = repull_once(GraphClient(FakeTransport(), StaticTokenProvider()), output_dir)
+
+    assert (summary.list_count, summary.task_count) == (2, 3)
+    assert "Backed up 2 lists and 3 tasks." in capsys.readouterr().out
 
 
 def test_pull_retries_after_throttling(tmp_path: Path) -> None:
@@ -262,9 +345,9 @@ class ThrottledTransport:
         self.task_attempts = 0
 
     def get(self, url: str, headers: dict[str, str]) -> dict:
-        if url == f"{GRAPH_ROOT}/me/todo/lists":
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
             return {"value": [{"id": "list-1", "displayName": "Inbox"}]}
-        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?"):
+        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta"):
             self.task_attempts += 1
             if self.task_attempts == 1:
                 raise Throttled(0)
@@ -280,7 +363,7 @@ class InterruptedTransport:
 
     def get(self, url: str, headers: dict[str, str]) -> dict:
         self.requests.append((url, headers))
-        if url == f"{GRAPH_ROOT}/me/todo/lists":
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
             return {"value": [{"id": "list-1", "displayName": "Inbox"}]}
         if url == f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?page=2":
             if self.fail_on_second_page:
@@ -296,7 +379,7 @@ class InterruptedTransport:
                 ],
                 "@odata.deltaLink": "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=abc",
             }
-        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?"):
+        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta"):
             self.initial_page_calls += 1
             return {
                 "value": [
@@ -314,9 +397,9 @@ class InterruptedTransport:
 
 class HtmlTransport:
     def get(self, url: str, headers: dict[str, str]) -> dict:
-        if url == f"{GRAPH_ROOT}/me/todo/lists":
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
             return {"value": [{"id": "list-1", "displayName": "Inbox"}]}
-        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta?"):
+        if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/list-1/tasks/delta"):
             return {
                 "value": [
                     {

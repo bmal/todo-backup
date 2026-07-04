@@ -46,13 +46,24 @@ class GraphClient:
         self._max_throttle_retries = max_throttle_retries
 
     def lists(self) -> list[GraphList]:
-        values: list[dict[str, Any]] = []
-        url = f"{GRAPH_ROOT}/me/todo/lists"
+        # The plain /me/todo/lists collection silently truncates for accounts
+        # with many lists (returns a subset with no @odata.nextLink and no
+        # error). The delta endpoint returns the complete set, so enumerate
+        # through it, follow @odata.nextLink to exhaustion, dedupe by id, and
+        # skip @removed entries. The trailing @odata.deltaLink is discarded —
+        # enumeration is a full pass on every run.
+        seen: dict[str, GraphList] = {}
+        url = f"{GRAPH_ROOT}/me/todo/lists/delta"
         while url:
             payload = self._get(url)
-            values.extend(payload.get("value", []))
+            for value in payload.get("value", []):
+                list_id = value["id"]
+                if "@removed" in value:
+                    seen.pop(list_id, None)
+                    continue
+                seen[list_id] = GraphList(id=list_id, display_name=value["displayName"])
             url = payload.get("@odata.nextLink")
-        return [GraphList(id=value["id"], display_name=value["displayName"]) for value in values]
+        return list(seen.values())
 
     def task_delta(self, list_id: str) -> tuple[list[dict[str, Any]], str]:
         return self.task_delta_url(self.task_delta_initial_url(list_id))
