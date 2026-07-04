@@ -317,6 +317,36 @@ def test_repull_refuses_home_directory(tmp_path: Path) -> None:
         repull_once(GraphClient(FakeTransport(), StaticTokenProvider()), Path.home())
 
 
+def test_repull_failure_leaves_previous_backup_intact(tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    # Establish a complete prior backup, then interrupt a repull partway through.
+    pull_once(GraphClient(FakeTransport(), StaticTokenProvider()), output_dir)
+    before = _output_texts(output_dir)
+    assert before
+
+    with pytest.raises(RuntimeError, match="network died"):
+        repull_once(GraphClient(FailingPullTransport(), StaticTokenProvider()), output_dir)
+
+    # Prior backup is untouched and no stray staging directories are left behind.
+    assert _output_texts(output_dir) == before
+    assert [path for path in output_dir.parent.iterdir() if path != output_dir] == []
+
+
+class FailingPullTransport:
+    def get(self, url: str, headers: dict[str, str]) -> dict:
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
+            return {"value": [{"id": "list-1", "displayName": "Inbox"}]}
+        raise RuntimeError("network died")
+
+
+def _output_texts(output_dir: Path) -> dict[str, str]:
+    return {
+        path.relative_to(output_dir).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(output_dir.rglob("*"))
+        if path.is_file()
+    }
+
+
 def test_missing_client_id_reports_configuration_error(tmp_path: Path, capsys) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({"outputDir": str(tmp_path / "out")}), encoding="utf-8")
