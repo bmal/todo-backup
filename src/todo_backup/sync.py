@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import shutil
 from typing import Any
@@ -10,7 +11,16 @@ from todo_backup.store import read_snapshot, read_state, read_state_or_empty, un
 from pathlib import Path
 
 
-def pull_once(graph: GraphClient, output_dir: Path) -> None:
+@dataclass(frozen=True)
+class PullSummary:
+    list_count: int
+    task_count: int
+
+    def line(self) -> str:
+        return f"Backed up {self.list_count} lists and {self.task_count} tasks."
+
+
+def pull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
     state = read_state_or_empty(output_dir)
     synced = _utc_now()
     used_markdown_files = {
@@ -18,7 +28,9 @@ def pull_once(graph: GraphClient, output_dir: Path) -> None:
         for list_state in state["lists"].values()
         if "markdownFile" in list_state
     }
-    for todo_list in graph.lists():
+    todo_lists = graph.lists()
+    task_count = 0
+    for todo_list in todo_lists:
         existing = state["lists"].get(todo_list.id)
         if existing and existing.get("deltaLink") and not existing.get("pullNextLink"):
             continue
@@ -50,6 +62,7 @@ def pull_once(graph: GraphClient, output_dir: Path) -> None:
         list_state = state["lists"][todo_list.id]
         while url:
             tasks, next_link, delta_link = graph.task_delta_page(url)
+            task_count += len(tasks)
             snapshot["tasks"].extend(tasks)
             snapshot["synced"] = synced
             list_state["lastSynced"] = synced
@@ -64,6 +77,10 @@ def pull_once(graph: GraphClient, output_dir: Path) -> None:
             list_state.pop("pullNextLink", None)
             write_pull_checkpoint(output_dir, state, snapshot, snapshot_file, render_markdown(snapshot), markdown_file)
             url = None
+
+    summary = PullSummary(list_count=len(todo_lists), task_count=task_count)
+    print(summary.line())
+    return summary
 
 
 def sync_once(graph: GraphClient, output_dir: Path) -> None:
@@ -161,11 +178,11 @@ def render_once(output_dir: Path) -> None:
     write_sync_output(output_dir, state, outputs)
 
 
-def repull_once(graph: GraphClient, output_dir: Path) -> None:
+def repull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
     _validate_repull_target(output_dir)
     if output_dir.exists():
         shutil.rmtree(output_dir)
-    pull_once(graph, output_dir)
+    return pull_once(graph, output_dir)
 
 
 def _validate_repull_target(output_dir: Path) -> None:

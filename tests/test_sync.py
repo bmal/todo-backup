@@ -23,12 +23,12 @@ class SyncFakeTransport:
 
     def get(self, url: str, headers: dict[str, str]) -> dict:
         self.requests.append((url, headers))
-        if url == f"{GRAPH_ROOT}/me/todo/lists":
+        if url == f"{GRAPH_ROOT}/me/todo/lists/delta":
             index = min(self.list_calls, len(self.list_payloads) - 1)
             self.list_calls += 1
             return {"value": self.list_payloads[index]}
         for list_id, payload in self.initial_task_payloads.items():
-            if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/{list_id}/tasks/delta?") and "deltatoken" not in url:
+            if url.startswith(f"{GRAPH_ROOT}/me/todo/lists/{list_id}/tasks/delta") and "deltatoken" not in url:
                 return payload
         if url == "https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/delta?$deltatoken=initial":
             return self.sync_payload
