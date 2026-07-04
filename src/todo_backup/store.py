@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +59,36 @@ def write_pull_checkpoint(
     if markdown is not None and markdown_file is not None:
         _write_text_if_changed(output_dir / markdown_file, markdown)
     _write_json_if_changed(output_dir / "state.json", state)
+
+
+def make_repull_staging(output_dir: Path) -> Path:
+    """Create an empty staging directory beside output_dir on the same filesystem.
+
+    A fresh pull is built here and later swapped into place, so os.replace can
+    move it atomically without crossing a filesystem boundary.
+    """
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.", suffix=".staging", dir=output_dir.parent))
+
+
+def swap_repull_into_place(staging: Path, output_dir: Path) -> None:
+    """Atomically replace output_dir with staging, discarding prior content only now.
+
+    The previous backup is moved aside first and removed only after the new one
+    is in place, so an interrupted swap can be restored and never leaves the
+    output missing.
+    """
+    if not output_dir.exists():
+        os.replace(staging, output_dir)
+        return
+    old = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.", suffix=".old", dir=output_dir.parent))
+    os.replace(output_dir, old)
+    try:
+        os.replace(staging, output_dir)
+    except BaseException:
+        os.replace(old, output_dir)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
 
 
 def unique_markdown_file(list_name: str, used: set[Path]) -> Path:

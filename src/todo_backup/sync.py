@@ -7,7 +7,16 @@ from typing import Any
 
 from todo_backup.graph import GraphClient
 from todo_backup.render import render_markdown
-from todo_backup.store import read_snapshot, read_state, read_state_or_empty, unique_markdown_file, write_pull_checkpoint, write_sync_output
+from todo_backup.store import (
+    make_repull_staging,
+    read_snapshot,
+    read_state,
+    read_state_or_empty,
+    swap_repull_into_place,
+    unique_markdown_file,
+    write_pull_checkpoint,
+    write_sync_output,
+)
 from pathlib import Path
 
 
@@ -180,9 +189,14 @@ def render_once(output_dir: Path) -> None:
 
 def repull_once(graph: GraphClient, output_dir: Path) -> PullSummary:
     _validate_repull_target(output_dir)
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    return pull_once(graph, output_dir)
+    staging = make_repull_staging(output_dir)
+    try:
+        summary = pull_once(graph, staging)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    swap_repull_into_place(staging, output_dir)
+    return summary
 
 
 def _validate_repull_target(output_dir: Path) -> None:
